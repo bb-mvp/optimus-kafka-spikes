@@ -1,0 +1,77 @@
+name: Reusable inner workflow to add transactions
+run-name: Reusable inner workflow to add transactions (triggered by @${{ github.actor }})
+on:
+  workflow_call:
+    inputs:
+      environment:
+        required: true
+        type: string
+    secrets:
+      database-host:
+        required: true
+      database-name:
+        required: true
+      database-username:
+        required: true
+      database-password:
+        required: true
+      database-port:
+        required: true
+
+jobs:
+  liquibase-action:
+    runs-on: ubuntu-latest
+    name: Add transactions
+    environment: ${{ inputs.environment }}
+    env:
+      DATABASE_HOST: ${{ secrets.database-host }}
+      DATABASE_NAME: ${{ secrets.database-name }}
+      DATABASE_USERNAME: ${{ secrets.database-username }}
+      DATABASE_PASSWORD: ${{ secrets.database-password }}
+      DATABASE_PORT: ${{ secrets.database-port }}
+    steps:
+      - uses: actions/checkout@v2
+
+      - name: install Liquibase
+        working-directory: ./bin
+        run: |
+          export LIQUIBASE_VERSION=4.16.1 && export LIQUIBASE_BUNDLE=liquibase-${LIQUIBASE_VERSION}.zip
+          wget -q https://github.com/liquibase/liquibase/releases/download/v${LIQUIBASE_VERSION}/${LIQUIBASE_BUNDLE}
+          echo "${GITHUB_WORKSPACE}/bin" >> $GITHUB_PATH
+          unzip ${LIQUIBASE_BUNDLE}
+          chmod +x liquibase
+
+      - name: check liquibase install
+        run: liquibase --version
+
+      - name: Install Gauge
+        uses: getgauge/setup-gauge@master
+        with:
+          gauge-version: master
+          gauge-plugins: python, html-report, screenshot
+
+      - name: Set up Python
+        uses: actions/setup-python@v2
+        with:
+          python-version: "3.x"
+
+      - name: Install Python dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: run liquibase update
+        env:
+          LIQUIBASE_CLASSPATH: "bin/internal/lib/postgresql.jar"
+          LIQUIBASE_HUB_MODE: "off"
+          LIQUIBASE_STRICT: "true"
+          LIQUIBASE_HEADLESS: "true"
+          LIQUIBASE_CHANGELOG_FILE: "dbchangelog.xml"
+
+        run: ./scripts/liquibase_update.sh
+
+      - name: Add transactions via Gauge spec
+        env:
+          # Temporary workaround for https://github.com/getgauge/gauge-python/issues/256
+          PROTOCOL_BUFFERS_PYTHON_IMPLEMENTATION: python
+        run: gauge run specs
